@@ -1,0 +1,122 @@
+# Название сборки. Будет видно во вкладке Actions
+name: Build APK
+
+# Когда запускать сборку
+on:
+  push:
+    branches: [main]      # автоматически при каждом изменении ветки main
+  workflow_dispatch:      # или вручную кнопкой "Run workflow"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest   # сборка выполняется на сервере GitHub с Linux
+    steps:
+
+      # 1. Скачать файлы репозитория (index.html) на сервер
+      - name: Скачать код репозитория
+        uses: actions/checkout@v4
+
+      # 2. Установить Java 21, без неё Android-сборка не работает
+      - name: Установить Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # 3. Установить Android SDK (набор инструментов Android)
+      - name: Установить Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 4. Установить Gradle, программу, которая собирает проект
+      - name: Установить Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      # 5. Создать Android-проект из index.html
+      - name: Создать Android-проект
+        run: |
+          mkdir -p app/src/main/assets app/src/main/java/com/goreflip/game
+          cp index.html app/src/main/assets/index.html
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'GoreFlip'
+          include ':app'
+          EOF
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          EOF
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.goreflip.game'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.goreflip.game'
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <application android:label="GoreFlip" android:theme="@android:style/Theme.Material.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+          cat > app/src/main/java/com/goreflip/game/MainActivity.java <<'EOF'
+          package com.goreflip.game;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+
+          public class MainActivity extends Activity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  WebView webView = new WebView(this);
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  webView.loadUrl("file:///android_asset/index.html");
+                  setContentView(webView);
+              }
+          }
+          EOF
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      # 6. Собрать APK
+      - name: Собрать APK
+        run: gradle assembleDebug
+
+      # 7. Сохранить готовый APK, чтобы его можно было скачать
+      - name: Сохранить APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoreFlip-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
